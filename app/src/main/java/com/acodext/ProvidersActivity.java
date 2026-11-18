@@ -56,7 +56,7 @@ public final class ProvidersActivity extends Activity {
         TextView description = Ui.text(this, "Connect an API provider, choose a model, then work in your own terminal.", 15, Ui.MUTED); body.addView(description);
 
         label(body, "Saved providers"); saved = new Spinner(this); body.addView(saved, new LinearLayout.LayoutParams(-1, Ui.dp(this, 48)));
-        url = field(body, "API base URL", "https://api.xingchiapi.com/v1", false); url.setId(R.id.provider_url); url.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        url = field(body, "API base URL", "https://api.example.com/v1", false); url.setId(R.id.provider_url); url.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         token = field(body, "API token", "Paste your API token", true); token.setId(R.id.provider_token);
         CheckBox reveal = new CheckBox(this); reveal.setText("Show token"); reveal.setTextColor(Ui.MUTED); reveal.setTextSize(13);
         reveal.setOnCheckedChangeListener((v, checked) -> { token.setTransformationMethod(checked ? null : PasswordTransformationMethod.getInstance()); token.setSelection(token.length()); }); body.addView(reveal);

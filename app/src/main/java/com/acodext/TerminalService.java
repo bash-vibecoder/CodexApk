@@ -17,6 +17,9 @@ import com.termux.terminal.TerminalSessionClient;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.util.concurrent.TimeUnit;
 
 public final class TerminalService extends Service implements TerminalSessionClient {
     public final class LocalBinder extends Binder { TerminalService getService() { return TerminalService.this; } }
@@ -27,11 +30,33 @@ public final class TerminalService extends Service implements TerminalSessionCli
     private final LocalBinder binder = new LocalBinder();
     private PowerManager.WakeLock wakeLock;
     boolean wakeEnabled;
+    private boolean rootMode;
 
     @Override public void onCreate() {
         super.onCreate();
+        rootMode = getSharedPreferences("runtime", 0).getBoolean("root_enabled", false);
         ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(new NotificationChannel("terminal", "Terminal sessions", NotificationManager.IMPORTANCE_LOW));
         updateNotification();
+    }
+
+    void setRootMode(boolean enabled) { rootMode = enabled; }
+
+    static boolean hasRootAccess() {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("su", "-c", "id -u").redirectErrorStream(true).start();
+            if (!process.waitFor(60, TimeUnit.SECONDS)) return false;
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            }
+            return process.exitValue() == 0 && output.toString().trim().equals("0");
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (process != null) process.destroy();
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -72,15 +97,34 @@ public final class TerminalService extends Service implements TerminalSessionCli
         environment.add("OPENSSL_CONF=" + prefix + "/etc/tls/openssl.cnf");
         environment.add("GIT_EXEC_PATH=" + prefix + "/libexec/git-core");
         environment.add("PYTHONHOME=" + prefix);
+        environment.add("ACODEXT_APP_UID=" + android.os.Process.myUid());
+        environment.add("ACODEXT_APP_GID=" + android.os.Process.myUid());
         if (profileId != null && !profileId.isEmpty()) environment.add("CODEX_PROFILE=" + profileId);
         if (codex) environment.add("CODEX_AUTOSTART=" + (resume ? "resume" : "new"));
-        TerminalSession s = new TerminalSession(prefix + "/bin/bash", cwd.getAbsolutePath(),
-            new String[]{"bash", "--rcfile", prefix + "/share/codex-terminal/bashrc", "-i"}, environment.toArray(new String[0]), 12000, this);
-        s.mSessionName = codex ? "Codex · " + cwd.getName() : "Shell · " + cwd.getName();
+        String shellPath = prefix + "/bin/bash";
+        String[] shellArgs = new String[]{"bash", "--rcfile", prefix + "/share/codex-terminal/bashrc", "-i"};
+        if (rootMode) {
+            if (!hasRootAccess()) throw new IllegalStateException("Root access was revoked. Disable Root mode or grant ACodexT UID 0.");
+            StringBuilder rootCommand = new StringBuilder();
+            rootCommand.append("cd ").append(shellQuote(cwd.getAbsolutePath())).append("; umask 000;");
+            for (String variable : environment) {
+                int separator = variable.indexOf('=');
+                if (separator > 0) rootCommand.append("export ").append(variable, 0, separator).append('=')
+                    .append(shellQuote(variable.substring(separator + 1))).append(';');
+            }
+            rootCommand.append("exec ").append(shellQuote(prefix + "/bin/bash"))
+                .append(" --rcfile ").append(shellQuote(prefix + "/share/codex-terminal/bashrc")).append(" -i");
+            shellPath = "su";
+            shellArgs = new String[]{"su", "-c", rootCommand.toString()};
+        }
+        TerminalSession s = new TerminalSession(shellPath, cwd.getAbsolutePath(), shellArgs, environment.toArray(new String[0]), 12000, this);
+        s.mSessionName = (rootMode ? "Root · " : "") + (codex ? "Codex · " : "Shell · ") + cwd.getName();
         sessions.add(s); selected = sessions.size() - 1;
         updateNotification();
         return s;
     }
+
+    private static String shellQuote(String value) { return "'" + value.replace("'", "'\\''") + "'"; }
 
     void closeSession(TerminalSession s) {
         s.finishIfRunning(); sessions.remove(s); selected = Math.min(selected, Math.max(0, sessions.size() - 1)); updateNotification();

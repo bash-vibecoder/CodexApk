@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2
+
+- Kept a single Continue action on existing project cards and clarified the project picker text.
+- Added the bottom-right Root toggle, which requests superuser access and enables root sessions only after confirming UID 0.
+- Removed provider-specific examples from the setup guide.
+
 ## 1.6.1
 
 - Ctrl+C from hardware keys or the Android keyboard interrupts the active terminal input and immediately returns to the ACodexT project picker.

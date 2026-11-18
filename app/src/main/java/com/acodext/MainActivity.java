@@ -14,6 +14,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -142,7 +143,7 @@ public final class MainActivity extends Activity implements ServiceConnection, T
         TextView title = Ui.text(this, ">_  ACodexT", 27, Ui.GREEN);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         page.addView(title);
-        TextView intro = Ui.text(this, "Choose a project to continue or start a new one.", 15, Ui.MUTED);
+        TextView intro = Ui.text(this, "Continue a project or create a new project.", 15, Ui.MUTED);
         intro.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 12));
         page.addView(intro);
         page.addView(Ui.button(this, "+  New project", true, v -> createProject()));
@@ -176,6 +177,16 @@ public final class MainActivity extends Activity implements ServiceConnection, T
         for (File project : projects) addProjectCard(list, project);
         scroll.addView(list);
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout rootRow = new LinearLayout(this);
+        rootRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        CheckBox rootBox = new CheckBox(this);
+        rootBox.setText("Root");
+        rootBox.setTextColor(Ui.TEXT);
+        rootBox.setTextSize(14);
+        rootBox.setChecked(getSharedPreferences("runtime", 0).getBoolean("root_enabled", false));
+        rootBox.setOnCheckedChangeListener((button, checked) -> requestRootMode(rootBox, checked));
+        rootRow.addView(rootBox, new LinearLayout.LayoutParams(-2, Ui.dp(this, 48)));
+        page.addView(rootRow, new LinearLayout.LayoutParams(-1, Ui.dp(this, 52)));
         setContentView(page);
     }
 
@@ -197,12 +208,34 @@ public final class MainActivity extends Activity implements ServiceConnection, T
         LinearLayout buttons = new LinearLayout(this);
         Button resume = smallButton("Continue", v -> openProject(project, true));
         resume.setTextColor(Ui.GREEN);
-        Button fresh = smallButton("New chat", v -> openProject(project, false));
-        fresh.setTextColor(Ui.TEXT);
         buttons.addView(resume, new LinearLayout.LayoutParams(0, Ui.dp(this, 44), 1));
-        buttons.addView(fresh, new LinearLayout.LayoutParams(0, Ui.dp(this, 44), 1));
         card.addView(buttons);
         list.addView(card);
+    }
+
+    private void requestRootMode(CheckBox box, boolean checked) {
+        if (!checked) {
+            getSharedPreferences("runtime", 0).edit().putBoolean("root_enabled", false).apply();
+            if (service != null) service.setRootMode(false);
+            return;
+        }
+        box.setEnabled(false);
+        new Thread(() -> {
+            boolean root = TerminalService.hasRootAccess();
+            runOnUiThread(() -> {
+                box.setEnabled(true);
+                if (!root) {
+                    box.setChecked(false);
+                    new AlertDialog.Builder(this).setTitle("Root access unavailable")
+                        .setMessage("ACodexT could not obtain UID 0. Install a superuser manager, grant ACodexT root access, then try again.")
+                        .setPositiveButton("Close", null).show();
+                    return;
+                }
+                getSharedPreferences("runtime", 0).edit().putBoolean("root_enabled", true).apply();
+                if (service != null) service.setRootMode(true);
+                toast("Root mode enabled for new sessions.");
+            });
+        }, "RootAccessCheck").start();
     }
 
     private void createProject() {

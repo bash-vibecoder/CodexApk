@@ -45,7 +45,7 @@ public final class Provider {
             return url;
         } catch (IllegalArgumentException e) {
             if (e.getMessage() != null) throw e;
-            throw new IllegalArgumentException("Enter a valid API base URL, such as https://api.xingchiapi.com/v1");
+            throw new IllegalArgumentException("Enter a valid API base URL, such as https://api.example.com/v1");
         } catch (Exception e) {
             throw new IllegalArgumentException("Enter a valid API base URL.");
         }
