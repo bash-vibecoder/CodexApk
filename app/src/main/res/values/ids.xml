@@ -1,0 +1,7 @@
+<resources>
+    <item type="id" name="provider_url" />
+    <item type="id" name="provider_token" />
+    <item type="id" name="provider_model" />
+    <item type="id" name="provider_status" />
+    <item type="id" name="save_provider" />
+</resources>

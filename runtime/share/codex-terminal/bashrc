@@ -1,0 +1,26 @@
+export PATH="$PREFIX/bin:/system/bin:/system/xbin"
+export LANG=C.UTF-8
+export COLORTERM=truecolor
+export TERM=xterm-256color
+export HISTFILE="$HOME/.bash_history"
+export HISTCONTROL=ignoreboth
+export PS1='\[\e[38;5;114m\]\w\[\e[0m\] $ '
+shopt -s checkwinsize histappend
+alias ll='ls -lah --color=auto'
+alias c='codex'
+codex() {
+    command codex "$@"
+    local result=$?
+    case "${1:-}" in
+        exec|--help|-h|--version|-V|--sites) ;;
+        *) /system/bin/am broadcast --receiver-foreground -a com.acodext.SHOW_PROJECTS -p com.acodext >/dev/null 2>&1 || true ;;
+    esac
+    return "$result"
+}
+printf '\033[38;5;114mACodexT\033[0m · ARM64\n'
+printf 'codex · codex -m MODEL · codex --sites · codex --site NAME\n'
+if [ -n "$CODEX_AUTOSTART" ]; then
+    CODEX_START_MODE="$CODEX_AUTOSTART"
+    unset CODEX_AUTOSTART
+    if [ "$CODEX_START_MODE" = "resume" ]; then codex resume; else codex; fi
+fi

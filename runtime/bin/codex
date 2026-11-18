@@ -1,0 +1,7 @@
+#!/data/data/com.acodext/root/usr/bin/python3
+"""Start upstream Codex using one of the app's private provider profiles."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'share/codex-terminal'))
+from launcher import main
+raise SystemExit(main())

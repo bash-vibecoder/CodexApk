@@ -1,0 +1,159 @@
+#!/data/data/com.acodext/root/usr/bin/python3
+"""Small package installer for the app's relocated Termux prefix.
+
+Supports ordinary relocatable packages. Packages requiring maintainer scripts
+or root integration are outside this installer's scope.
+"""
+import fcntl
+import gzip
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import tarfile
+import urllib.request
+
+PREFIX = Path('/data/data/com.acodext/root/usr')
+FILES = PREFIX.parent
+OLD, NEW = b'/data/data/com.termux/files', b'/data/data/com.acodext/root'
+REPO = 'https://packages.termux.dev/apt/termux-main/'
+STATE = PREFIX / 'share/codex-terminal/packages.json'
+CACHE = PREFIX / 'var/cache/codex-terminal'
+
+def get(url):
+    return urllib.request.urlopen(url, timeout=120).read()
+
+def index(refresh=False):
+    path = CACHE / 'Packages.gz'
+    if refresh or not path.exists():
+        data = get(REPO + 'dists/stable/main/binary-aarch64/Packages.gz')
+        tmp = path.with_suffix('.part')
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    packages = {}
+    for block in gzip.decompress(path.read_bytes()).decode().split('\n\n'):
+        d = {}
+        for line in block.splitlines():
+            if ': ' in line and not line.startswith(' '):
+                k, v = line.split(': ', 1)
+                d[k] = v
+        if d.get('Package'):
+            packages[d['Package']] = d
+    return packages
+
+def ar_data(raw):
+    if not raw.startswith(b'!<arch>\n'):
+        raise ValueError('Invalid Debian archive')
+    pos = 8
+    while pos + 60 <= len(raw):
+        header = raw[pos:pos + 60]
+        size = int(header[48:58])
+        name = header[:16].strip().rstrip(b'/').decode()
+        pos += 60
+        if name.startswith('data.tar'):
+            return raw[pos:pos + size]
+        pos += size + size % 2
+    raise ValueError('No package payload')
+
+def install(d):
+    name = d['Package']
+    print('Installing', name, d['Version'], flush=True)
+    raw = get(REPO + d['Filename'])
+    if hashlib.sha256(raw).hexdigest() != d['SHA256']:
+        raise ValueError('Package checksum mismatch')
+    with tarfile.open(fileobj=io.BytesIO(ar_data(raw)), mode='r:*') as tar:
+        for item in tar:
+            path = item.name.removeprefix('./')
+            base = 'data/data/com.termux/files/'
+            if not path.startswith(base):
+                continue
+            rel = path[len(base):]
+            if '..' in Path(rel).parts or Path(rel).is_absolute():
+                raise ValueError('Unsafe package path')
+            if rel in ['usr/bin/pkg', 'usr/bin/apt', 'usr/bin/apt-get', 'usr/bin/dpkg']:
+                continue
+            if rel == 'usr/bin/codex':
+                rel = 'usr/bin/codex-native'
+            dest = FILES / rel
+            # Do not let archive symlinks redirect extraction outside our app.
+            if not str(dest.parent.resolve()).startswith(str(FILES) + '/') and dest.parent != FILES:
+                raise ValueError('Unsafe symlink in package destination')
+            if item.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif item.issym():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists() or dest.is_symlink():
+                    dest.unlink()
+                dest.symlink_to(item.linkname.replace(OLD.decode(), NEW.decode()))
+            elif item.isfile():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.is_symlink():
+                    dest.unlink()
+                # Atomic replacement also permits upgrades of running executables.
+                tmp = dest.with_name(dest.name + '.codext-tmp')
+                tmp.write_bytes(tar.extractfile(item).read().replace(OLD, NEW).replace(b'/data/user/0/com.termux/files', b'/data/user/0/com.acodext/root'))
+                tmp.chmod(0o700 if item.mode & 0o111 else 0o600)
+                tmp.replace(dest)
+
+def main():
+    args = [x for x in sys.argv[1:] if x not in ['-y', '--yes']]
+    if not args or args[0] in ['--help', '-h', 'help']:
+        print('pkg update | install NAME... | upgrade | list | search WORD\nPackages install into this app only. Maintainer scripts are not run.')
+        return
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with (CACHE / 'install.lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        installed = json.loads(STATE.read_text())
+        command = args.pop(0)
+        if command == 'list':
+            for n, v in sorted(installed.items()):
+                print(n, v)
+            return
+        packages = index(command in ['update', 'upgrade'])
+        if command == 'update':
+            print('Package index updated.')
+            return
+        if command == 'search':
+            query = ' '.join(args).lower()
+            for n, d in packages.items():
+                if query in (n + ' ' + d.get('Description', '')).lower():
+                    print(n + ': ' + d.get('Description', ''))
+            return
+        if command not in ['install', 'upgrade']:
+            raise ValueError('Use pkg --help for available commands')
+        names = list(installed) if command == 'upgrade' else args
+        if not names:
+            raise ValueError('Specify a package name')
+        visited = set()
+        def add(name):
+            if name in visited:
+                return
+            visited.add(name)
+            if name not in packages:
+                raise ValueError('Package not found: ' + name)
+            d = packages[name]
+            if installed.get(name) == d['Version']:
+                return
+            for group in (d.get('Pre-Depends', '') + ',' + d.get('Depends', '')).split(','):
+                options = [re.split(r'[ (]', part.strip())[0] for part in group.split('|') if part.strip()]
+                if options:
+                    dep = next((n for n in options if n in packages), options[0])
+                    add(dep)
+            install(d)
+            installed[name] = d['Version']
+            temp = STATE.with_suffix('.tmp')
+            temp.write_text(json.dumps(installed))
+            temp.replace(STATE)
+        for name in names:
+            add(name)
+        print('Done.')
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        print('pkg:', str(e), file=sys.stderr)
+        raise SystemExit(1)

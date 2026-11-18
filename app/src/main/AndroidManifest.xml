@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.acodext" android:versionCode="8" android:versionName="1.6.1">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="28" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <application android:label="ACodexT" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/AppTheme" android:allowBackup="false" android:usesCleartextTraffic="true" android:extractNativeLibs="true" android:resizeableActivity="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden|keyboard|smallestScreenSize|screenLayout" android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".ProvidersActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <receiver android:name=".ProjectReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="com.acodext.SHOW_PROJECTS" />
+            </intent-filter>
+        </receiver>
+        <service android:name=".TerminalService" android:exported="false" android:stopWithTask="false" />
+    </application>
+</manifest>

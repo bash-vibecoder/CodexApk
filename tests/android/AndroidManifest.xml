@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.acodext.validation" android:versionCode="1" android:versionName="1">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="28" />
+    <application android:label="ACodexT validation" />
+    <instrumentation android:name="com.acodext.SmokeInstrumentation" android:targetPackage="com.acodext" android:label="ACodexT on-device validation" />
+</manifest>

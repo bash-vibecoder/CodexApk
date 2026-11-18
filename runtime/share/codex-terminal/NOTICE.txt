@@ -1,0 +1,22 @@
+ACodexT is an independent project, not an official OpenAI or Termux app.
+
+Upstream Codex: https://github.com/openai/codex
+Apache License 2.0, with notices and third-party components from upstream.
+ARM64 Android build: Termux packages, pinned in runtime-lock.json.
+
+Terminal renderer, emulator, and PTY code:
+https://github.com/termux/termux-app, tag v0.118.3, commit
+5b657c6adf4304e5198951ce815fe0205dcac29c.
+Termux repository license: GPL-3.0-only, with Apache-2.0 exceptions for
+parts derived from Android Terminal Emulator. See the distributed source.
+Local JNI correction: ReleaseStringUTFChars uses the matching cwd jstring.
+
+The bundled Termux binaries have been relocated from /data/data/com.termux/files
+to /data/data/com.acodext/root using an equal-length prefix substitution. No files
+from an installed Termux app are used by the APK.
+
+Bundled packages retain their own copyright and license terms. Their source
+URLs, exact versions, repository hashes, and package paths are recorded in
+runtime-lock.json. Package documentation/licenses are in $PREFIX/share/doc.
+Source for package recipes and patches: https://github.com/termux/termux-packages
+Source for this APK, runtime scripts, and build instructions accompany the APK.
