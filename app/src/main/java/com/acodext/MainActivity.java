@@ -42,7 +42,6 @@ public final class MainActivity extends Activity implements ServiceConnection, T
     private TextView status;
     private float fontSp = 13;
     private boolean startingUp;
-    private File activeProject;
     private File pendingProject;
     private boolean pendingResume;
     private boolean pendingCodex = true;
@@ -130,10 +129,13 @@ public final class MainActivity extends Activity implements ServiceConnection, T
     }
 
     private void showProjects() {
+        if (terminal != null) {
+            ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(terminal.getWindowToken(), 0);
+        }
         clearOneShotModifiers();
+        hardwareControl = false;
         terminal = null;
         tabs = null;
-        activeProject = null;
         modifierButtons.clear();
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
@@ -263,25 +265,26 @@ public final class MainActivity extends Activity implements ServiceConnection, T
     private void openProject(File project, boolean resume) {
         try {
             if (service == null) { pendingProject = project; pendingResume = resume; pendingCodex = true; return; }
-            if (service.sessions.size() >= 12) { toast("Close a terminal session before opening another."); return; }
             Provider provider = Profiles.load(this).selected();
             if (provider == null) { openProviders(); return; }
-            activeProject = project;
-            service.createSession(true, provider.id, project, resume);
-            buildTerminal();
-            attach(service.selected);
+            TerminalSession session = service.openSession(true, provider.id, project, resume);
+            showTerminal(session);
+            if (service.isRootSession(session) != service.isRootMode()) {
+                toast("This session is already open. The Root setting applies when you start a session.");
+            }
         } catch (Exception e) { toast(e.getMessage()); }
     }
 
     private void openShell() {
         try {
             if (service == null) { pendingProject = projectsDirectory(); pendingResume = false; pendingCodex = false; return; }
-            if (service.sessions.size() >= 12) { toast("Close a terminal session before opening another."); return; }
-            activeProject = projectsDirectory();
-            service.createSession(false, null, activeProject, false);
-            buildTerminal();
-            attach(service.selected);
+            showTerminal(service.openSession(false, null, projectsDirectory(), false));
         } catch (Exception e) { toast(e.getMessage()); }
+    }
+
+    private void showTerminal(TerminalSession session) {
+        if (terminal == null) buildTerminal();
+        attach(service.sessions.indexOf(session));
     }
 
     private void buildTerminal() {
@@ -348,7 +351,14 @@ public final class MainActivity extends Activity implements ServiceConnection, T
             final int index = i; TerminalSession session = service.sessions.get(i);
             Button b = smallButton((i + 1) + "  " + session.mSessionName + (session.isRunning() || session.getEmulator() == null ? "" : " · ended"), v -> attach(index));
             b.setTextSize(12); b.setTextColor(i == service.selected ? Ui.GREEN : Ui.MUTED);
-            b.setOnLongClickListener(v -> { new AlertDialog.Builder(this).setMessage("Close this terminal session?").setNegativeButton("Cancel", null).setPositiveButton("Close", (d, w) -> { service.closeSession(session); if (service.sessions.isEmpty()) newSession(false); else attach(service.selected); }).show(); return true; });
+            b.setOnLongClickListener(v -> { new AlertDialog.Builder(this).setMessage("Close this terminal session?").setNegativeButton("Cancel", null).setPositiveButton("Close", (d, w) -> {
+                if (service == null || terminal == null) return;
+                boolean current = session == terminal.getCurrentSession();
+                service.closeSession(session);
+                if (service.sessions.isEmpty()) showProjects();
+                else if (current) attach(service.selected);
+                else refreshTabs();
+            }).show(); return true; });
             tabs.addView(b, new LinearLayout.LayoutParams(-2, -1));
         }
         tabs.addView(smallButton("+", v -> newSession(false)), new LinearLayout.LayoutParams(Ui.dp(this, 44), -1));
@@ -365,13 +375,11 @@ public final class MainActivity extends Activity implements ServiceConnection, T
 
     private void newSession(boolean codex) {
         try {
-            if (service.sessions.size() >= 12) { toast("Close a session before opening another."); return; }
+            if (service == null || terminal == null) return;
             Provider p = Profiles.load(this).selected();
             if (codex && p == null) { openProviders(); return; }
-            File directory = activeProject == null ? projectsDirectory() : activeProject;
-            service.createSession(codex, p == null ? null : p.id, directory, false);
-            if (terminal == null) buildTerminal();
-            attach(service.selected);
+            File directory = service.sessionDirectory(terminal.getCurrentSession());
+            showTerminal(service.openSession(codex, p == null ? null : p.id, directory, false));
         } catch (Exception e) { toast(e.getMessage()); }
     }
 
@@ -421,11 +429,8 @@ public final class MainActivity extends Activity implements ServiceConnection, T
     }
 
     private void interruptAndShowProjects() {
-        if (terminal != null && terminal.getCurrentSession() != null) {
-            terminal.getCurrentSession().writeCodePoint(false, 3);
-        }
-        clearOneShotModifiers();
-        hardwareControl = false;
+        TerminalSession session = terminal == null ? null : terminal.getCurrentSession();
+        if (session != null) session.writeCodePoint(false, 3);
         showProjects();
     }
 
@@ -472,19 +477,26 @@ public final class MainActivity extends Activity implements ServiceConnection, T
 
     @Override public void onServiceConnected(ComponentName name, IBinder binder) {
         service = ((TerminalService.LocalBinder)binder).getService();
-        service.listener = s -> { if (terminal != null && terminal.getCurrentSession() == s) terminal.onScreenUpdated(); };
+        service.listener = new TerminalService.Listener() {
+            @Override public void changed(TerminalSession session) {
+                if (terminal != null && terminal.getCurrentSession() == session) terminal.onScreenUpdated();
+            }
+
+            @Override public void finished(TerminalSession session, boolean codex) {
+                if (terminal == null) return;
+                if (codex && terminal.getCurrentSession() == session) {
+                    if (session.getExitStatus() != 0) toast("Codex exited (code " + session.getExitStatus() + ").");
+                    showProjects();
+                } else refreshTabs();
+            }
+        };
         if (pendingProject != null) {
             File project = pendingProject;
             boolean resume = pendingResume;
             boolean codex = pendingCodex;
             pendingProject = null;
             if (codex) openProject(project, resume);
-            else {
-                activeProject = project;
-                service.createSession(false, null, project, false);
-                buildTerminal();
-                attach(service.selected);
-            }
+            else openShell();
         } else if (terminal != null && !service.sessions.isEmpty()) attach(service.selected);
     }
     @Override public void onServiceDisconnected(ComponentName name) { service = null; }

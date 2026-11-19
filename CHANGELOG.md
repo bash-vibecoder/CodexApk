@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.6
+
+- Home and Back leave Codex running. Continue reconnects to the open project session, avoiding the conversation lock error.
+- When Codex exits, ACodexT returns to the project picker. Continue then resumes the saved chat.
+
+## 1.6.5
+
+- Made interrupted runtime upgrades recover using a fresh staging directory while keeping the previous runtime until the replacement is ready.
+- Kept Root mode changes in the running app; turning Root off applies to new sessions without an app restart.
+
+## 1.6.4
+
+- Continue remembers the latest Codex session ID separately for each project and resumes that exact conversation.
+
+## 1.6.3
+
+- Continue now resumes the latest saved Codex conversation for the selected project.
+
 ## 1.6.2
 
 - Kept a single Continue action on existing project cards and clarified the project picker text.

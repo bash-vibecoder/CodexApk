@@ -51,8 +51,8 @@ with zipfile.ZipFile('build/unsigned.apk', 'a', zipfile.ZIP_DEFLATED) as z:
 PY
 [[ -f .tools/codext-signing.jks ]] || "$CODEXT_JAVA/keytool" -genkeypair -keystore .tools/codext-signing.jks -alias codext -storepass android -keypass android -keyalg RSA -keysize 3072 -validity 10000 -dname 'CN=ACodexT Local Build' -noprompt
 zipalign -f -p 4 build/unsigned.apk build/aligned.apk
-apksigner sign --ks .tools/codext-signing.jks --ks-key-alias codext --ks-pass pass:android --key-pass pass:android --out dist/ACodexT-v1.6.2-arm64.apk build/aligned.apk
-apksigner verify --verbose dist/ACodexT-v1.6.2-arm64.apk
-aapt dump badging dist/ACodexT-v1.6.2-arm64.apk | head -8
-sha256sum dist/ACodexT-v1.6.2-arm64.apk > dist/ACodexT-v1.6.2-arm64.apk.sha256
-ls -lh dist/ACodexT-v1.6.2-arm64.apk
+apksigner sign --ks .tools/codext-signing.jks --ks-key-alias codext --ks-pass pass:android --key-pass pass:android --out dist/ACodexT-v1.6.6-arm64.apk build/aligned.apk
+apksigner verify --verbose dist/ACodexT-v1.6.6-arm64.apk
+aapt dump badging dist/ACodexT-v1.6.6-arm64.apk | head -8
+sha256sum dist/ACodexT-v1.6.6-arm64.apk > dist/ACodexT-v1.6.6-arm64.apk.sha256
+ls -lh dist/ACodexT-v1.6.6-arm64.apk

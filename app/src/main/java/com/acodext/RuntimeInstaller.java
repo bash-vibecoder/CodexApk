@@ -20,7 +20,7 @@ final class RuntimeInstaller {
     private static boolean running;
     private static Listener listener;
     private static final Handler handler = new Handler(Looper.getMainLooper());
-    private static final String VERSION = "2";
+    private static final String VERSION = "3";
 
     static boolean ready(Context c) { return new File(RuntimePaths.root(c), "usr/.acodext-runtime-" + VERSION).isFile(); }
 
@@ -31,10 +31,13 @@ final class RuntimeInstaller {
         Context context = c.getApplicationContext();
         new Thread(() -> {
             Exception failure = null;
-            File stage = new File(RuntimePaths.root(context), "runtime-staging");
+            File stage = new File(RuntimePaths.root(context), "runtime-staging-v" + VERSION + "-" + java.util.UUID.randomUUID());
             try {
                 if (!ready(context)) install(context, stage);
-            } catch (Exception e) { failure = e; }
+            } catch (Exception e) {
+                failure = e;
+                try { delete(stage); } catch (Exception cleanup) { e.addSuppressed(cleanup); }
+            }
             final Exception result = failure;
             handler.post(() -> {
                 Listener target;
@@ -53,7 +56,6 @@ final class RuntimeInstaller {
         if (free < 1024L * 1024L * 1024L) {
             throw new IOException("ACodexT needs at least 1 GiB of free device storage for its Codex and terminal runtime. Free up space and tap Retry.");
         }
-        delete(stage);
         if (!stage.mkdirs()) throw new IllegalStateException("Could not create runtime staging folder.");
         String root = stage.getCanonicalPath() + "/";
         JSONObject links = null;
@@ -98,12 +100,21 @@ final class RuntimeInstaller {
             }
             Os.symlink(links.getString(key), path.getAbsolutePath());
         }
+        File stagedRuntime = new File(stage, "usr");
+        new File(stagedRuntime, ".acodext-runtime-" + VERSION).createNewFile();
+        new File(stagedRuntime, "tmp").mkdirs();
         File installed = new File(RuntimePaths.root(context), "usr");
-        if (installed.exists()) delete(installed);
-        if (!new File(stage, "usr").renameTo(installed)) throw new IllegalStateException("Could not activate runtime.");
-        new File(installed, ".acodext-runtime-" + VERSION).createNewFile();
-        new File(installed, "tmp").mkdirs();
+        File backup = new File(RuntimePaths.root(context), "usr-backup-" + java.util.UUID.randomUUID());
+        boolean backedUp = installed.exists();
+        if (backedUp && !installed.renameTo(backup)) throw new IllegalStateException("Could not safely replace the old terminal runtime.");
+        if (!stagedRuntime.renameTo(installed)) {
+            if (backedUp) backup.renameTo(installed);
+            throw new IllegalStateException("Could not activate runtime.");
+        }
         new File(RuntimePaths.root(context), "home/projects").mkdirs();
+        if (backedUp) {
+            try { delete(backup); } catch (Exception ignored) { }
+        }
         delete(stage);
     }
 

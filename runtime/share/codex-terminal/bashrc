@@ -22,5 +22,5 @@ printf 'codex · codex -m MODEL · codex --sites · codex --site NAME\n'
 if [ -n "$CODEX_AUTOSTART" ]; then
     CODEX_START_MODE="$CODEX_AUTOSTART"
     unset CODEX_AUTOSTART
-    if [ "$CODEX_START_MODE" = "resume" ]; then codex resume; else codex; fi
+    if [ "$CODEX_START_MODE" = "resume" ]; then codex resume --last; else codex; fi
 fi

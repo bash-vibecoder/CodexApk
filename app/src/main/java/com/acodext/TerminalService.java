@@ -14,17 +14,40 @@ import android.os.PowerManager;
 import android.util.Log;
 import com.termux.terminal.TerminalSession;
 import com.termux.terminal.TerminalSessionClient;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 public final class TerminalService extends Service implements TerminalSessionClient {
     public final class LocalBinder extends Binder { TerminalService getService() { return TerminalService.this; } }
-    interface Listener { void changed(TerminalSession session); }
+    interface Listener {
+        void changed(TerminalSession session);
+        void finished(TerminalSession session, boolean codex);
+    }
+
+    private static final class SessionInfo {
+        final File directory;
+        final String profile;
+        final boolean codex, root;
+
+        SessionInfo(File directory, String profile, boolean codex, boolean root) {
+            this.directory = directory;
+            this.profile = profile;
+            this.codex = codex;
+            this.root = root;
+        }
+    }
+
     final List<TerminalSession> sessions = new ArrayList<>();
+    // Access order lets Continue pick the most recently viewed tab for this project.
+    private final Map<TerminalSession, SessionInfo> sessionInfo = new LinkedHashMap<>(16, 0.75f, true);
     Listener listener;
     int selected;
     private final LocalBinder binder = new LocalBinder();
@@ -63,6 +86,7 @@ public final class TerminalService extends Service implements TerminalSessionCli
         if (intent != null && "STOP".equals(intent.getAction())) {
             for (TerminalSession s : new ArrayList<>(sessions)) s.finishIfRunning();
             sessions.clear();
+            sessionInfo.clear();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -78,12 +102,33 @@ public final class TerminalService extends Service implements TerminalSessionCli
         startForeground(41, n);
     }
 
-    TerminalSession createSession(boolean codex, String profileId, File project, boolean resume) {
+    private TerminalSession runningProject(File directory, String profileId) {
+        TerminalSession match = null;
+        for (Map.Entry<TerminalSession, SessionInfo> entry : sessionInfo.entrySet()) {
+            SessionInfo info = entry.getValue();
+            if (info.codex && info.directory.equals(directory) && Objects.equals(info.profile, profileId)
+                    && entry.getKey().isRunning()) match = entry.getKey();
+        }
+        return match;
+    }
+
+    File sessionDirectory(TerminalSession session) { return sessionInfo.get(session).directory; }
+    boolean isRootSession(TerminalSession session) { return sessionInfo.get(session).root; }
+    boolean isRootMode() { return rootMode; }
+
+    TerminalSession openSession(boolean codex, String profileId, File project, boolean resume) {
         if (!RuntimeInstaller.ready(this)) throw new IllegalStateException("The terminal runtime is still installing.");
         String files = RuntimePaths.root(this).getAbsolutePath();
         String prefix = files + "/usr";
         String home = files + "/home";
         File cwd = project == null ? new File(home, "projects") : project;
+        try { cwd = cwd.getCanonicalFile(); }
+        catch (IOException ignored) { cwd = cwd.getAbsoluteFile(); }
+        if (codex && resume) {
+            TerminalSession running = runningProject(cwd, profileId);
+            if (running != null) return running;
+        }
+        if (sessions.size() >= 12) throw new IllegalStateException("Close a terminal session before opening another.");
         cwd.mkdirs();
         List<String> environment = new ArrayList<>();
         environment.add("HOME=" + home); environment.add("PREFIX=" + prefix);
@@ -100,25 +145,31 @@ public final class TerminalService extends Service implements TerminalSessionCli
         environment.add("ACODEXT_APP_UID=" + android.os.Process.myUid());
         environment.add("ACODEXT_APP_GID=" + android.os.Process.myUid());
         if (profileId != null && !profileId.isEmpty()) environment.add("CODEX_PROFILE=" + profileId);
-        if (codex) environment.add("CODEX_AUTOSTART=" + (resume ? "resume" : "new"));
-        String shellPath = prefix + "/bin/bash";
-        String[] shellArgs = new String[]{"bash", "--rcfile", prefix + "/share/codex-terminal/bashrc", "-i"};
+
+        // Make the Codex launcher the terminal process, so its exit means the conversation
+        // has closed. A Bash autostart would leave a live shell after Codex has already quit.
+        String codexPath = prefix + "/bin/codex";
+        String[] command = codex
+            ? (resume ? new String[]{codexPath, "resume", "--last"} : new String[]{codexPath})
+            : new String[]{prefix + "/bin/bash", "--rcfile", prefix + "/share/codex-terminal/bashrc", "-i"};
+        String shellPath = command[0];
         if (rootMode) {
             if (!hasRootAccess()) throw new IllegalStateException("Root access was revoked. Disable Root mode or grant ACodexT UID 0.");
             StringBuilder rootCommand = new StringBuilder();
-            rootCommand.append("cd ").append(shellQuote(cwd.getAbsolutePath())).append("; umask 000;");
+            rootCommand.append("cd ").append(shellQuote(cwd.getAbsolutePath())).append(" || exit; umask 000;");
             for (String variable : environment) {
                 int separator = variable.indexOf('=');
                 if (separator > 0) rootCommand.append("export ").append(variable, 0, separator).append('=')
                     .append(shellQuote(variable.substring(separator + 1))).append(';');
             }
-            rootCommand.append("exec ").append(shellQuote(prefix + "/bin/bash"))
-                .append(" --rcfile ").append(shellQuote(prefix + "/share/codex-terminal/bashrc")).append(" -i");
+            rootCommand.append("exec");
+            for (String argument : command) rootCommand.append(' ').append(shellQuote(argument));
             shellPath = "su";
-            shellArgs = new String[]{"su", "-c", rootCommand.toString()};
+            command = new String[]{"su", "-c", rootCommand.toString()};
         }
-        TerminalSession s = new TerminalSession(shellPath, cwd.getAbsolutePath(), shellArgs, environment.toArray(new String[0]), 12000, this);
+        TerminalSession s = new TerminalSession(shellPath, cwd.getAbsolutePath(), command, environment.toArray(new String[0]), 12000, this);
         s.mSessionName = (rootMode ? "Root · " : "") + (codex ? "Codex · " : "Shell · ") + cwd.getName();
+        sessionInfo.put(s, new SessionInfo(cwd, profileId, codex, rootMode));
         sessions.add(s); selected = sessions.size() - 1;
         updateNotification();
         return s;
@@ -126,8 +177,19 @@ public final class TerminalService extends Service implements TerminalSessionCli
 
     private static String shellQuote(String value) { return "'" + value.replace("'", "'\\''") + "'"; }
 
+    private void removeSession(TerminalSession s) {
+        int index = sessions.indexOf(s);
+        if (index == -1) return;
+        sessions.remove(index);
+        sessionInfo.remove(s);
+        if (index < selected) selected--;
+        selected = Math.min(selected, Math.max(0, sessions.size() - 1));
+        updateNotification();
+    }
+
     void closeSession(TerminalSession s) {
-        s.finishIfRunning(); sessions.remove(s); selected = Math.min(selected, Math.max(0, sessions.size() - 1)); updateNotification();
+        s.finishIfRunning();
+        removeSession(s);
     }
 
     void toggleWakeLock() {
@@ -147,7 +209,12 @@ public final class TerminalService extends Service implements TerminalSessionCli
     private void changed(TerminalSession s) { if (listener != null) listener.changed(s); }
     @Override public void onTextChanged(TerminalSession s) { changed(s); }
     @Override public void onTitleChanged(TerminalSession s) { changed(s); }
-    @Override public void onSessionFinished(TerminalSession s) { changed(s); }
+    @Override public void onSessionFinished(TerminalSession s) {
+        SessionInfo info = sessionInfo.get(s);
+        if (info == null) return;
+        if (info.codex) removeSession(s);
+        if (listener != null) listener.finished(s, info.codex);
+    }
     @Override public void onCopyTextToClipboard(TerminalSession s, String text) {
         ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Terminal", text));
     }
